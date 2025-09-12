@@ -1,0 +1,68 @@
+---
+- name: 4. Install Containerd Runtime
+  hosts: all
+  become: yes
+  tasks:
+    - name: Remove old containerd.io package to avoid conflicts
+      ansible.builtin.apt:
+        name: containerd.io
+        state: absent
+
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gpg
+          - tar
+        state: present
+        update_cache: yes
+
+    - name: Download and extract Containerd v2.1.4
+      ansible.builtin.unarchive:
+        src: https://github.com/containerd/containerd/releases/download/v2.1.4/containerd-2.1.4-linux-amd64.tar.gz
+        dest: /usr/local
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0755'
+        creates: /usr/local/bin/containerd
+  
+    - name: Create systemd directory
+      ansible.builtin.file:
+        path: /usr/local/lib/systemd/system
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Download containerd systemd service file
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/containerd/containerd/main/containerd.service
+        dest: /usr/local/lib/systemd/system/containerd.service
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Create default Containerd config file
+      ansible.builtin.shell: "containerd config default | tee /etc/containerd/config.toml"
+      args:
+        creates: /etc/containerd/config.toml
+
+    - name: Enable SystemdCgroup in Containerd config
+      ansible.builtin.lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*SystemdCgroup = false'
+        line: '{{ " " * 10 }}SystemdCgroup = true'
+        backrefs: yes
+
+    - name: Reload systemd daemon
+      ansible.builtin.systemd_service:
+        daemon_reload: yes
+
+    - name: Enable and start containerd service
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: started
+        enabled: yes

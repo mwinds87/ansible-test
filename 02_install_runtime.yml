@@ -1,0 +1,58 @@
+---
+- name: 2. Install Containerd Runtime
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install prerequisite packages for Containerd
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gpg
+          - tar
+        state: present
+        update_cache: yes
+
+    - name: Download and install runc
+      ansible.builtin.get_url:
+        url: https://github.com/opencontainers/runc/releases/download/v1.4.0-rc.1/runc.amd64
+        dest: /usr/local/sbin/runc
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create CNI plugins directory
+      ansible.builtin.file:
+        path: /opt/cni/bin
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Download and extract CNI plugins
+      ansible.builtin.unarchive:
+        src: https://github.com/containernetworking/plugins/releases/download/v1.8.0/cni-plugins-linux-amd64-v1.8.0.tgz
+        dest: /opt/cni/bin
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0755'
+        
+    - name: Create default Containerd config file
+      ansible.builtin.shell: "containerd config default | tee /etc/containerd/config.toml"
+      args:
+        creates: /etc/containerd/config.toml
+
+    - name: Enable SystemdCgroup in Containerd config
+      ansible.builtin.lineinfile:
+        path: /etc/containerd/config.toml
+        line: '          SystemdCgroup = true'
+        insertafter: 'BinaryName = ""'
+
+    - name: Ensure containerd service is enabled and started
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: started
+        enabled: yes
+        daemon_reload: yes

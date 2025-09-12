@@ -1,0 +1,108 @@
+---
+- name: Install Docker and configure user permissions
+  hosts: vms
+  become: yes
+
+  vars:
+    target_user: "{{ ansible_user }}"
+
+  tasks:
+    - name: Remove old Docker packages if they exist
+      ansible.builtin.apt:
+        name:
+          - docker.io
+          - docker-doc
+          - docker-compose
+          - docker-compose-v2
+          - podman-docker
+          - containerd
+          - runc
+        state: absent
+
+    - name: Disable swap
+      ansible.builtin.command: "swapoff -a"
+      failed_when: "'not supported' not in swapoff_result.stderr and swapoff_result.rc != 0"
+      register: swapoff_result
+      changed_when: "'disabling swap' in swapoff_result.stdout"
+
+    - name: Ensure apt cache is up to date (first time)
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install prerequisite packages for Docker
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+        state: present
+
+    - name: Create directory for Docker GPG key
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download Docker's official GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: 'a+r'
+        
+    - name: Add Docker APT repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_facts['distribution_release'] }} stable"
+        state: present
+        filename: docker
+
+    - name: Re-run apt update to include the new repository
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install Docker Engine packages
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+      
+    - name: Ensure 'docker' group exists
+      ansible.builtin.group:
+        name: docker
+        state: present
+
+    - name: Add user '{{ target_user }}' to the 'docker' group
+      ansible.builtin.user:
+        name: "{{ target_user }}"
+        groups: docker
+        append: yes
+      
+    - name: Ensure .docker directory exists for user '{{ target_user }}'
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.docker"
+        state: directory
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0755'
+      
+    - name: Set permissions for .docker directory
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.docker"
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: 'u=rwx,g=rwx'
+        recurse: yes
+
+    - name: Ensure Docker service is enabled and started
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Ensure containerd service is enabled and started
+      ansible.builtin.systemd:
+        name: containerd
+        state: started
+        enabled: yes
