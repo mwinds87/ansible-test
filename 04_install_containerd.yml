@@ -1,13 +1,29 @@
 ---
-- name: 4. Install Containerd Runtime
+- name: 4. Install Containerd Runtime (Custom Service Path)
   hosts: all
   become: yes
   tasks:
+    # 任務 1：確保 /usr/local 基礎目錄存在
+    - name: Ensure /usr/local base directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /usr/local
+        - /usr/local/bin
+        # **新增：確保自定義服務目錄的父目錄也存在**
+        - /usr/local/lib/systemd/system
+
+    # 任務 2：移除舊的套件
     - name: Remove old containerd.io package to avoid conflicts
       ansible.builtin.apt:
         name: containerd.io
         state: absent
 
+    # 任務 3：安裝前置條件
     - name: Install prerequisite packages
       ansible.builtin.apt:
         name:
@@ -18,7 +34,8 @@
           - tar
         state: present
         update_cache: yes
-
+        
+    # 任務 4：下載並解壓 Containerd v2.1.4
     - name: Download and extract Containerd v2.1.4
       ansible.builtin.unarchive:
         src: https://github.com/containerd/containerd/releases/download/v2.1.4/containerd-2.1.4-linux-amd64.tar.gz
@@ -28,39 +45,48 @@
         group: root
         mode: '0755'
         creates: /usr/local/bin/containerd
-  
-    - name: Create systemd directory
+
+    # 任務 5：建立 Containerd 符號連結
+    - name: Create symbolic link for containerd in /usr/bin
       ansible.builtin.file:
-        path: /usr/local/lib/systemd/system
-        state: directory
+        src: /usr/local/bin/containerd
+        dest: /usr/bin/containerd
+        state: link
         owner: root
         group: root
-        mode: '0755'
 
-    - name: Download containerd systemd service file
+    # 任務 6：將服務檔案下載至自定義位置 (根據您的要求修改)
+    - name: Download and PLACE containerd systemd service file
       ansible.builtin.get_url:
         url: https://raw.githubusercontent.com/containerd/containerd/main/containerd.service
-        dest: /usr/local/lib/systemd/system/containerd.service
+        # **關鍵變更：使用您指定的自定義路徑**
+        dest: /usr/local/lib/systemd/system/containerd.service 
         owner: root
         group: root
         mode: '0644'
 
+    # 任務 7：創建預設 Containerd 配置檔
     - name: Create default Containerd config file
-      ansible.builtin.shell: "containerd config default | tee /etc/containerd/config.toml"
+      ansible.builtin.shell: "containerd config default | sudo tee /etc/containerd/config.toml"
       args:
         creates: /etc/containerd/config.toml
 
-    - name: Enable SystemdCgroup in Containerd config
+    # 任務 8：插入 SystemdCgroup = true (解決 lineinfile/YAML 語法問題)
+    - name: Insert SystemdCgroup = true into runc options
       ansible.builtin.lineinfile:
         path: /etc/containerd/config.toml
-        regexp: '^\s*SystemdCgroup = false'
-        line: '{{ " " * 10 }}SystemdCgroup = true'
-        backrefs: yes
+        regexp: |
+          ^\s*BinaryName\s*=\s*''
+        insertbefore: |
+          ^\s*BinaryName\s*=\s*''
+        line: '            SystemdCgroup = true'
 
+    # 任務 9：重新載入 Systemd daemon
     - name: Reload systemd daemon
       ansible.builtin.systemd_service:
         daemon_reload: yes
 
+    # 任務 10：啟用並啟動 containerd 服務
     - name: Enable and start containerd service
       ansible.builtin.systemd_service:
         name: containerd
