@@ -1,6 +1,6 @@
 ---
-- name: 4. Install Containerd Runtime (Custom Service Path)
-  hosts: all
+- name: 4. Install Containerd Runtime (Custom Service Path - Final Fix)
+  hosts: localhost
   become: yes
   tasks:
     # 任務 1：確保 /usr/local 基礎目錄存在
@@ -14,8 +14,7 @@
       loop:
         - /usr/local
         - /usr/local/bin
-        # **新增：確保自定義服務目錄的父目錄也存在**
-        - /usr/local/lib/systemd/system
+        - /usr/local/lib/systemd/system # 自定義服務目錄
 
     # 任務 2：移除舊的套件
     - name: Remove old containerd.io package to avoid conflicts
@@ -55,23 +54,31 @@
         owner: root
         group: root
 
-    # 任務 6：將服務檔案下載至自定義位置 (根據您的要求修改)
+    # 任務 6：將服務檔案下載至自定義位置
     - name: Download and PLACE containerd systemd service file
       ansible.builtin.get_url:
         url: https://raw.githubusercontent.com/containerd/containerd/main/containerd.service
-        # **關鍵變更：使用您指定的自定義路徑**
-        dest: /usr/local/lib/systemd/system/containerd.service 
+        dest: /usr/local/lib/systemd/system/containerd.service
         owner: root
         group: root
         mode: '0644'
 
-    # 任務 7：創建預設 Containerd 配置檔
+    # **新增任務：確保 /etc/containerd 目錄存在 (修復 FAILED 錯誤)**
+    - name: Ensure /etc/containerd directory exists for config file
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    # 任務 7：創建預設 Containerd 配置檔 (現在父目錄已存在，此任務將成功)
     - name: Create default Containerd config file
       ansible.builtin.shell: "containerd config default | sudo tee /etc/containerd/config.toml"
       args:
         creates: /etc/containerd/config.toml
 
-    # 任務 8：插入 SystemdCgroup = true (解決 lineinfile/YAML 語法問題)
+    # 任務 8：插入 SystemdCgroup = true
     - name: Insert SystemdCgroup = true into runc options
       ansible.builtin.lineinfile:
         path: /etc/containerd/config.toml
